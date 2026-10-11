@@ -112,6 +112,13 @@ details summary{cursor:pointer;font-weight:700;min-height:40px;display:flex;alig
 .legend{display:flex;gap:14px;font-size:13px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
 .legend i{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .sidenav{display:none}
+.freeze{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#7dd3fc;background:rgba(125,211,252,.1);border:1px solid rgba(125,211,252,.25);padding:3px 9px;border-radius:99px}
+.freeze svg{width:14px;height:14px}
+.countdown{font-size:64px;font-weight:900;letter-spacing:-.04em;color:var(--accent);line-height:1;text-shadow:0 0 30px rgba(0,210,106,.35)}
+.btnrow{display:flex;gap:10px;margin-top:10px}.btnrow .btn{flex:1}
+.catch{margin-top:14px;border:1px dashed #1f5a3a;border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.toggle{min-height:44px;padding:0 14px;border-radius:12px;border:1px solid #1f5a3a;background:transparent;color:var(--accent);font-weight:800}
+.toggle.on{background:var(--accent);color:#03130a}
 .pfhead{display:grid;gap:12px}
 .pfbig{font-size:34px;font-weight:900;letter-spacing:-.03em}
 .updated{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:4px}
@@ -306,6 +313,7 @@ details summary{cursor:pointer;font-weight:700;min-height:40px;display:flex;alig
 'use strict';
 const KEY='investmentGuru.v1';
 const GOAL=10000;
+const DEFAULT_START='2026-10-15'; // this user's first investing day
 const fmt=n=>new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD',minimumFractionDigits:n>=1000?0:2,maximumFractionDigits:n>=1000?0:2}).format(n||0);
 const fmt0=n=>'$'+Math.round(n).toLocaleString('en-CA');
 const fmt2=n=>new Intl.NumberFormat('en-CA',{style:'currency',currency:'CAD'}).format(n||0);
@@ -349,9 +357,11 @@ const LEARN=[["What is a stock?", "A stock (also called a share) is a tiny piece
 const defaults=()=>({version:1,created:todayStr(),settings:{daily:10,days:7,core:'XEQT',safe:'CASH',rate:0.06,theme:'auto',notify:false},
   deposits:[], // {date, items:[{tk,role,amt}]}
   balances:{}, // tk -> {value, date}
-  lastBalanceUpdate:null, trophies:{}, quotes:null});
+  lastBalanceUpdate:null, trophies:{}, quotes:null, skips:[]});
 let state;
-function load(){try{state=Object.assign(defaults(),JSON.parse(localStorage.getItem(KEY)||'{}'));state.settings=Object.assign(defaults().settings,state.settings);}catch(e){state=defaults();}}
+function load(){try{state=Object.assign(defaults(),JSON.parse(localStorage.getItem(KEY)||'{}'));state.settings=Object.assign(defaults().settings,state.settings);}catch(e){state=defaults();}
+  if(!Array.isArray(state.skips))state.skips=[];
+  if(!state.settings.start){const f=state.deposits.map(d=>d.date).sort()[0];state.settings.start=f||DEFAULT_START;save();}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('⚠️ Could not save. Storage may be full or blocked.');}}
 
 // ---------- Calculations ----------
@@ -384,14 +394,41 @@ function anyReal(){return Object.keys(state.balances).length>0||valueSource()!==
 function depositDates(){return [...new Set(state.deposits.map(d=>d.date))].sort();}
 const isWE=x=>{const d=parseD(x).getDay();return d===0||d===6;};
 const prevWD=x=>{do{x=addDays(x,-1);}while(isWE(x));return x;};
-function streak(){ // counts weekdays (trading days) in a row; weekends never break it
-  const ds=new Set(depositDates()); let x=todayStr();
-  if(isWE(x)||!ds.has(x)) x=prevWD(x);
-  let n=0; while(ds.has(x)){n++;x=prevWD(x);} return n;
+// Forgiving streaks: trading days (weekdays) from the start date. Start with 1 freeze; earn 1 more for every
+// 7 invested trading days (max 3). A skipped or missed trading day uses a freeze instead of breaking the streak.
+function streakInfo(){
+  const t=todayStr(), st=state.settings.start, inv=new Set(depositDates());
+  let cur=0,best=0,fr=1,run=0,used=0,x=st;
+  if(!st||st>t)return {cur:0,best:0,freezes:1,usedLast:false};
+  let lastFrozen=false;
+  while(x<=t){
+    if(!isWE(x)){
+      if(inv.has(x)){cur++;run++;lastFrozen=false;if(run%7===0&&fr<3)fr++;}
+      else if(x===t&&!state.skips.includes(x)){/* today still open */}
+      else if(fr>0){fr--;used++;lastFrozen=true;}
+      else{cur=0;run=0;fr=1;lastFrozen=false;}
+      best=Math.max(best,cur);
+    }
+    x=addDays(x,1);
+  }
+  return {cur,best,freezes:fr,used,lastFrozen};
 }
-function bestStreak(){const ds=depositDates().filter(d=>!isWE(d));if(!ds.length)return 0;const set=new Set(ds);let best=0,cur=0,x=ds[0];const end=ds[ds.length-1];
-  while(x<=end){if(!isWE(x)){cur=set.has(x)?cur+1:0;best=Math.max(best,cur);}x=addDays(x,1);}return best;}
+function streak(){return streakInfo().cur;}
+function bestStreak(){return streakInfo().best;}
+const SNOW='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M4.9 6.5l14.2 11M19.1 6.5 4.9 17.5M9 4l3 2 3-2M9 20l3-2 3 2"/></svg>';
+const freezeBadge=n=>`<span class="freeze" title="Streak freezes: each one covers a skipped weekday without breaking your streak">${SNOW}${n} freeze${n===1?'':'s'}</span>`;
+function skippedToday(){return state.skips.includes(todayStr());}
+function missedPrev(){ // last trading day before today (on/after start) with no deposit
+  const t=todayStr();const p=prevWD(t);if(p<state.settings.start)return null;
+  return depositDates().includes(p)?null:p;}
 const perDay=()=>state.settings.daily*(state.settings.days||7)/7; // average per calendar day
+function simDays(v,daily,rate,goal){ // days from today until value reaches goal; deposits begin on the start date
+  goal=goal||GOAL; if(v>=goal)return 0; const wait=Math.max(0,daysBetween(todayStr(),state.settings.start));
+  if(daily<=0&&rate<=0)return Infinity; const dr=Math.pow(1+rate,1/365)-1; let n=0;
+  while(v<goal&&n<36500){n++;v=v*(1+dr)+(n>wait||wait===0?daily:0);} return n;}
+function actualPace(){ // average $ per calendar day since start, once there's a week of history
+  const t=todayStr(),st=state.settings.start; if(st>t)return null; const days=daysBetween(st,t)+1; if(days<7)return null;
+  const tot=state.deposits.filter(d=>d.date>=st).reduce((a,d)=>a+d.items.reduce((x,i)=>x+i.amt,0),0); return {perDay:tot/days,days};}
 function daysToGoal(start,daily,rate){
   if(start>=GOAL)return 0; if(daily<=0&&rate<=0)return Infinity;
   if(rate===0)return Math.ceil((GOAL-start)/daily);
@@ -495,29 +532,60 @@ function show(tab){
 function weightedMer(){const p=planFor(todayStr());const tot=p.reduce((a,x)=>a+x.amt,0);return p.reduce((a,x)=>a+x.amt*(infoFor(x.tk).mer||0),0)/tot;}
 function costLine(){const m=weightedMer();const yr=state.settings.daily*365;const base=Math.max(currentValue(),yr);
   return `about ${m.toFixed(2)}% a year in fund fees, roughly ${fmt2(base*m/100)} a year on ${fmt(base)}. Wealthsimple charges $0 to buy these, and there's no currency fee because everything is in Canadian dollars. Inside your TFSA, there's no tax on gains.`;}
-function renderToday(){
-  const t=todayStr(), plan=planFor(t), done=doneToday();
+let catchUp=false;
+function planToday(t){const base=planFor(t);if(!catchUp)return base;return base.map(p=>({...p,amt:+(p.amt*2).toFixed(2)}));}
+function slotsHTML(plan,t){
   const g=growthFor(t); const nextMon=addDays(t,7-((parseD(t).getDay()+6)%7));
   const labels={core:'Core',safety:'Safety',growth:'Growth bet'};
-  const slots=plan.map(p=>{const inf=infoFor(p.tk);const alt=p.role==='core'?(p.tk==='XEQT'?'VEQT':'XEQT'):p.role==='safety'?(p.tk==='CASH'?'PSA':'CASH'):null;
+  return plan.map(p=>{const inf=infoFor(p.tk);const alt=p.role==='core'?(p.tk==='XEQT'?'VEQT':'XEQT'):p.role==='safety'?(p.tk==='CASH'?'PSA':'CASH'):null;
     return `<div class="slot"><div class="amt">${fmt2(p.amt).replace('.00','')}</div><div><div class="tk">${esc(p.tk)}<span>${labels[p.role]}</span></div>
     <div class="small" style="opacity:.85">${esc(inf.name)}</div><div class="why">${esc(inf.why)}</div>
     ${alt?`<div class="alt">Can't find it? ${alt} does the same job.</div>`:''}
     ${p.role==='growth'?`<div class="alt">This week's pick. A new one rotates in on ${parseD(nextMon).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}.${g.type==='CDR'?' In Wealthsimple, choose the one labelled <b>CDR</b> (priced in CAD) so you avoid currency fees.':''}</div>`:''}
     </div></div>`;}).join('');
-  $('todayCard').innerHTML=`<div class="sub">${niceDate(t)} · Wealthsimple TFSA</div><h1>${done?'Done for today':'Today, put your '+fmt2(state.settings.daily).replace('.00','')+' here'}</h1>
-   <div class="split">${slots}</div>
-   ${isWE(t)?`<div class="small" style="margin-top:14px;color:var(--accent)"><b>It's the weekend.</b> Markets are closed, so an order placed now goes through Monday. Taking the weekend off is fine too: streaks only count weekdays.</div>`:''}
-   <div class="small" style="margin-top:14px;opacity:.92"><b>Best time to buy:</b> after 11:00 AM Atlantic on a weekday. The market opens at 10:30 AM Atlantic and prices jump around most in the first half hour.</div>
-   <div class="small" style="margin-top:8px;opacity:.92"><b>What this costs you:</b> ${costLine()}</div>
-   <button class="bigbtn ${done?'done':''}" id="didIt">${done?'✓ Logged. Tap to edit or undo':'I did it'}</button>`;
-  $('didIt').onclick=()=>editDay(t);
-  const s=streak(), inv=totalInvested(), val=currentValue();
+}
+function renderToday(){
+  const t=todayStr(), done=doneToday(), st=state.settings.start, skipped=skippedToday();
+  const S=streakInfo();
+  if(st>t){ // countdown before the start date
+    const n=daysBetween(t,st);
+    $('todayCard').innerHTML=`<div class="sub">${niceDate(t)} · Wealthsimple TFSA</div>
+      <h1>Your first ${fmt2(state.settings.daily).replace('.00','')} goes in on ${parseD(st).toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}</h1>
+      <div class="row" style="align-items:baseline;gap:12px;margin-top:10px"><div class="countdown">${n}</div><div style="font-weight:800;font-size:18px">day${n===1?'':'s'} to go</div></div>
+      <p class="small" style="opacity:.9;margin:12px 0 0">Here's a preview of how that first ${fmt2(state.settings.daily).replace('.00','')} will be split. Meanwhile, make sure your Wealthsimple TFSA has some cash in it, and read the Learn tab.</p>
+      <div class="split">${slotsHTML(planFor(st),st)}</div>
+      <div class="btnrow"><button class="btn" id="startNow">Start today instead</button><button class="btn" id="goLearn">Read the basics</button></div>`;
+    $('startNow').onclick=()=>{state.settings.start=t;save();render();toast('Start date moved to today');};
+    $('goLearn').onclick=()=>show('learn');
+  }else if(skipped&&!done){
+    $('todayCard').innerHTML=`<div class="sub">${niceDate(t)} · Wealthsimple TFSA</div><h1>Skipped today. No stress.</h1>
+      <p style="opacity:.9">${S.lastFrozen?'A streak freeze covered it, so your streak is safe.':'Your streak is reset, but your money is still growing. Tomorrow is a fresh start.'} Tomorrow you'll get the option to catch up the missed ${fmt2(state.settings.daily).replace('.00','')}.</p>
+      <div class="row" style="margin-top:6px">${freezeBadge(S.freezes)}</div>
+      <div class="btnrow"><button class="btn" id="undoSkip">Undo skip</button><button class="btn primary" id="didAnyway">I invested after all</button></div>`;
+    $('undoSkip').onclick=()=>{state.skips=state.skips.filter(d=>d!==t);save();render();toast('Skip undone');};
+    $('didAnyway').onclick=()=>{state.skips=state.skips.filter(d=>d!==t);save();editDay(t);};
+  }else{
+    const missed=!done&&!isWE(t)?missedPrev():null;
+    const plan=planToday(t);
+    $('todayCard').innerHTML=`<div class="sub">${niceDate(t)} · Wealthsimple TFSA</div><h1>${done?'Done for today':'Today, put your '+fmt2(plan.reduce((a,p)=>a+p.amt,0)).replace('.00','')+' here'}</h1>
+     ${missed?`<div class="catch"><div class="small"><b>Want to catch up?</b> You missed ${parseD(missed).toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}. Totally optional: add the missed ${fmt2(state.settings.daily).replace('.00','')} today, split the same way.</div><button class="toggle ${catchUp?'on':''}" id="catchBtn">${catchUp?'Catching up ✓':'Make it '+fmt2(state.settings.daily*2).replace('.00','')}</button></div>`:''}
+     <div class="split">${slotsHTML(plan,t)}</div>
+     ${isWE(t)?`<div class="small" style="margin-top:14px;color:var(--accent)"><b>It's the weekend.</b> Markets are closed, so an order placed now goes through Monday. Taking the weekend off is fine too: streaks only count weekdays.</div>`:''}
+     <div class="small" style="margin-top:14px;opacity:.92"><b>Best time to buy:</b> after 11:00 AM Atlantic on a weekday. The market opens at 10:30 AM Atlantic and prices jump around most in the first half hour.</div>
+     <div class="small" style="margin-top:8px;opacity:.92"><b>What this costs you:</b> ${costLine()}</div>
+     <button class="bigbtn ${done?'done':''}" id="didIt">${done?'✓ Logged. Tap to edit or undo':'I did it'}</button>
+     ${!done&&!isWE(t)?`<div class="btnrow"><button class="btn" id="skipBtn" style="background:transparent">Skip today</button></div>`:''}`;
+    $('didIt').onclick=()=>editDay(t,done?null:plan);
+    if($('catchBtn'))$('catchBtn').onclick=()=>{catchUp=!catchUp;renderToday();};
+    if($('skipBtn'))$('skipBtn').onclick=()=>{if(!state.skips.includes(t))state.skips.push(t);catchUp=false;save();render();const s2=streakInfo();toast(s2.lastFrozen?'Skipped. A streak freeze kept your streak alive.':'Skipped. Fresh start tomorrow.');};
+  }
+  const inv=totalInvested(), val=currentValue();
   $('todaySummary').innerHTML=`<div class="stats">
-    <div class="stat"><div class="lbl">Streak (weekdays)</div><div class="val">${s} day${s===1?'':'s'}</div><div class="note">${done?'Come back tomorrow!':s?'Keep it alive today':'Start one today'}</div></div>
+    <div class="stat"><div class="lbl">Streak (weekdays)</div><div class="val">${S.cur} day${S.cur===1?'':'s'}</div><div class="note" style="margin-top:6px">${freezeBadge(S.freezes)}</div><div class="note">Best: ${S.best}</div></div>
     <div class="stat"><div class="lbl">Put in so far</div><div class="val">${fmt(inv)}</div><div class="note">${depositDates().length} days invested</div></div>
     <div class="stat" style="grid-column:1/-1"><div class="lbl">Worth now ${srcBadge(valueSource())}</div><div class="val">${fmt(val)}</div>
-    <div class="bar" style="margin-top:10px"><i style="width:${Math.min(100,val/GOAL*100).toFixed(2)}%"></i></div><div class="note">${(val/GOAL*100).toFixed(1)}% of the way to $10,000</div></div></div>`;
+    <div class="bar" style="margin-top:10px"><i style="width:${Math.min(100,val/GOAL*100).toFixed(2)}%"></i></div><div class="note">${(val/GOAL*100).toFixed(1)}% of the way to $10,000</div></div></div>
+    <p class="small muted" style="margin:12px 0 0">Streak freezes: you start with 1 and earn another for every 7 weekdays you invest (up to 3). Each one covers a skipped weekday so your streak doesn't reset.</p>`;
 }
 function reminderHTML(){
   if(!state.deposits.length)return '';
@@ -536,7 +604,7 @@ function renderTracker(){
    <div class="stat"><div class="lbl">Put in</div><div class="val">${fmt(inv)}</div><div class="note">Your own money</div></div>
    <div class="stat"><div class="lbl">Worth now</div><div class="val">${fmt(val)}</div><div class="note">${srcBadge(valueSource())}${valueSource()==='est'?' at '+pct(state.settings.rate)+'/yr':''}</div></div>
    <div class="stat"><div class="lbl">Gain / loss</div><div class="val" style="color:${gain>=0?'var(--accent)':'var(--danger)'}">${gain>=0?'+':''}${fmt2(gain)}</div><div class="note">${inv?((gain/inv)*100).toFixed(1)+'%':'—'}</div></div>
-   <div class="stat"><div class="lbl">Streak</div><div class="val">${streak()} days</div><div class="note">Weekdays in a row · best ${bestStreak()}</div></div>
+   <div class="stat"><div class="lbl">Streak</div><div class="val">${streak()} days</div><div class="note">${freezeBadge(streakInfo().freezes)} · best ${bestStreak()}</div></div>
    <div class="stat" style="grid-column:1/-1"><div class="lbl">What this costs you</div><div class="note" style="font-size:14px;color:var(--text)">Fund fees of about ${weightedMer().toFixed(2)}% a year, which is about ${fmt2(currentValue()*weightedMer()/100)} a year on what you have now. $0 trading fees, $0 currency fees, $0 tax (TFSA).</div></div>`;
   $('goalBar').style.width=Math.min(100,val/GOAL*100)+'%'; $('goalPct').textContent=(val/GOAL*100).toFixed(1)+'%';
   document.querySelectorAll('.rateLbl').forEach(e=>e.textContent=pct(state.settings.rate));
@@ -551,10 +619,10 @@ function renderTracker(){
 const pct=r=>(r*100).toFixed(0)+'%';
 function renderChart(){
   const W=640,H=260,P={l:52,r:12,t:12,b:28};
-  const t=todayStr(); const start=state.deposits.length?depositDates()[0]:t;
+  const t=todayStr(); const fd=state.deposits.length?depositDates()[0]:null; let start=[fd,state.settings.start].filter(Boolean).sort()[0]||t; if(start>t)start=t;
   const daily=perDay(), r=state.settings.rate;
   const nowVal=currentValue(), nowInv=totalInvested();
-  const left=daysToGoal(nowVal,daily,r); const horizon=Math.min(isFinite(left)?left:1000,3650);
+  const left=simDays(nowVal,daily,r); const horizon=Math.min(isFinite(left)?left:1000,3650);
   const past=Math.max(0,daysBetween(start,t)); const total=Math.max(30,past+horizon);
   const step=Math.max(1,Math.floor(total/120));
   const inv=[],val=[]; const dr=Math.pow(1+r,1/365)-1;
@@ -563,7 +631,7 @@ function renderChart(){
   let ci=0,cv=0;
   for(let k=0;k<=total;k++){const ds=addDays(start,k);
     if(k<=past){ci+=byDate[ds]||0;cv=cv*(1+dr)+(byDate[ds]||0); if(k===past){cv=nowVal;ci=nowInv;}}
-    else{ci+=daily;cv=cv*(1+dr)+daily;}
+    else{const add=ds>=state.settings.start?daily:0;ci+=add;cv=cv*(1+dr)+add;}
     if(k%step===0||k===total){inv.push([k,ci]);val.push([k,cv]);}}
   const maxY=Math.max(GOAL*1.05,...val.map(p=>p[1]));
   const x=k=>P.l+(k/total)*(W-P.l-P.r), y=v=>H-P.b-(v/maxY)*(H-P.t-P.b);
@@ -578,15 +646,16 @@ function renderChart(){
    <text x="${W-P.r}" y="${H-8}" font-size="11" text-anchor="end" fill="var(--muted)">${parseD(endD).toLocaleDateString('en-CA',{month:'short',year:'numeric'})}</text></svg>`;
 }
 function renderForecast(){
-  const daily=perDay(), v=currentValue();
-  $('fcDaily').textContent=fmt2(state.settings.daily)+(state.settings.days===5?' every weekday':'');
+  const daily=perDay(), v=currentValue(), t=todayStr(), st=state.settings.start, pace=actualPace();
+  $('fcDaily').textContent=fmt2(state.settings.daily)+(state.settings.days===5?' every weekday':' a day')+(st>t?' starting '+parseD(st).toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'}):'');
   $('rateSel').value=String(state.settings.rate);
-  const rows=[[0,'No growth (just your savings)'],[0.05,'5% a year (assumption)'],[0.07,'7% a year (assumption)']].map(([r,l])=>{
-    const n=daysToGoal(v,daily,r); const d=addDays(todayStr(),n);
-    const yrs=(n/365).toFixed(1);
-    return `<div class="fcrow"><div><b>${l}</b><div class="small muted">${n===0?'You made it!':`about ${yrs} years · ${n.toLocaleString()} days`}</div></div><div style="text-align:right"><div class="big">${n===0?'Done':parseD(d).toLocaleDateString('en-CA',{month:'short',year:'numeric'})}</div><div class="small muted">${n?'reach $10,000':''}</div></div></div>`;}).join('');
-  const m=[100,1000,5000].filter(x=>x>v).slice(0,3).map(x=>{const n=daysToGoal(v,daily,0.05)>0?daysToGoalTo(v,daily,0.05,x):0;return `<li>${fmt(x)} by about <b>${parseD(addDays(todayStr(),n)).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}</b></li>`;}).join('');
-  $('fc').innerHTML=rows+(m?`<div class="small muted" style="margin-top:4px">Next milestones at 5% (assumption):<ul style="margin:6px 0 0;padding-left:20px">${m}</ul></div>`:'');
+  const row=(l,n,sub)=>{const d=addDays(t,n);return `<div class="fcrow"><div><b>${l}</b><div class="small muted">${n===0?'You made it!':(isFinite(n)?`about ${(n/365).toFixed(1)} years · ${n.toLocaleString()} days`:'not at this pace')}${sub?' · '+sub:''}</div></div><div style="text-align:right"><div class="big">${n===0?'Done':isFinite(n)?parseD(d).toLocaleDateString('en-CA',{month:'short',year:'numeric'}):'—'}</div><div class="small muted">${n?'reach $10,000':''}</div></div></div>`;};
+  let html=[[0,'No growth (just your savings)'],[0.05,'5% a year (assumption)'],[0.07,'7% a year (assumption)']].map(([r,l])=>row(l,simDays(v,daily,r))).join('');
+  if(pace){const pct=daily?Math.round(pace.perDay/daily*100):0;
+    html+=`<div class="small muted" style="margin-top:6px"><b style="color:var(--text)">Your actual pace so far:</b> about ${fmt2(pace.perDay)} a day over ${pace.days} days (${pct}% of the plan). Including skips, at that pace:</div>`+row('Your pace, 5% a year (assumption)',simDays(v,pace.perDay,0.05));}
+  else html+=`<div class="small muted" style="margin-top:6px">After your first week, this screen also shows a forecast based on your <b>actual pace</b>, including any skipped days.</div>`;
+  const m=[100,1000,5000].filter(x=>x>v).slice(0,3).map(x=>`<li>${fmt(x)} by about <b>${parseD(addDays(t,simDays(v,daily,0.05,x))).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}</b></li>`).join('');
+  $('fc').innerHTML=html+(m?`<div class="small muted" style="margin-top:4px">Next milestones on the plan at 5% (assumption):<ul style="margin:6px 0 0;padding-left:20px">${m}</ul></div>`:'');
 }
 function daysToGoalTo(start,daily,rate,goal){const dr=Math.pow(1+rate,1/365)-1;let v=start,n=0;while(v<goal&&n<36500){v=v*(1+dr)+daily;n++;}return n;}
 function renderTrophies(){
@@ -631,11 +700,12 @@ function render(){renderReminder();renderToday();renderPortfolio();renderTracker
 // ---------- Actions ----------
 function logDay(date,items){
   state.deposits=state.deposits.filter(d=>d.date!==date);
+  state.skips=state.skips.filter(d=>d!==date); catchUp=false;
   state.deposits.push({date,items:items.map(i=>({tk:i.tk,role:i.role,amt:+i.amt,sh:(typeof i.sh==='number'?i.sh:null),est:!!i.est}))});
   save(); const fresh=checkTrophies(true); if(!fresh.length){confetti(18);toast('Nice! '+fmt2(items.reduce((a,i)=>a+ +i.amt,0))+' invested. Streak: '+streak());} render();
 }
-function editDay(date){
-  const ex=state.deposits.find(d=>d.date===date); const items=ex?ex.items:planFor(date);
+function editDay(date,prefill){
+  const ex=state.deposits.find(d=>d.date===date); const items=ex?ex.items:(prefill||planFor(date));
   const unk=ex?ex.items.every(i=>i.sh==null||i.est):false;
   const Q=(state.quotes&&state.quotes.prices)||{};
   openModal(`<h2>${ex?'Edit':'Log'} ${niceDate(date)}</h2><p class="small muted">Type what you actually bought. To find the shares, open the order in Wealthsimple's <b>Activity</b> tab (it shows something like “0.1517 shares”).</p>
@@ -684,6 +754,7 @@ function settings(){
   const s=state.settings;
   openModal(`<h2>Settings & backup</h2>
    <div class="field"><label>Daily amount (CAD)</label><input type="number" id="st-daily" min="1" step="1" value="${s.daily}"></div>
+   <div class="field"><label>Start date (your first investing day)</label><input type="date" id="st-start" value="${s.start}"></div>
    <div class="field"><label>Days I invest</label><select id="st-days"><option value="7" ${s.days!==5?'selected':''}>Every day (7 a week)</option><option value="5" ${s.days===5?'selected':''}>Weekdays only (5 a week)</option></select></div>
    <div class="field"><label>Core fund</label><select id="st-core"><option ${s.core==='XEQT'?'selected':''}>XEQT</option><option ${s.core==='VEQT'?'selected':''}>VEQT</option></select></div>
    <div class="field"><label>Safety fund</label><select id="st-safe"><option ${s.safe==='CASH'?'selected':''}>CASH</option><option ${s.safe==='PSA'?'selected':''}>PSA</option></select></div>
@@ -695,7 +766,7 @@ function settings(){
    <h3 style="margin-top:18px">About the picks</h3><p class="small muted">Core: XEQT/VEQT (all-in-one global stock funds). Safety: CASH/PSA (savings-account-style funds). Growth bet rotates weekly: ${GROWTH.map(g=>g.tk).join(', ')}. Stocks marked CDR are Canadian Depositary Receipts: a Canadian-dollar version of a U.S. stock with currency protection built in. Approximate yearly fund fees (MER, the fee built into a fund's price): XEQT 0.19%, VEQT 0.22%, CASH 0.11%, PSA 0.17%, XQQ/ZQQ about 0.39%, CDRs have no yearly fund fee. Live prices come from TMX Money's free public data (may be delayed ~15 min). The app can't see your Wealthsimple account, so you log what you bought (and shares, if you know them).</p>
    <div class="row"><button class="btn" id="stClose">Close</button></div>`);
   $('stClose').onclick=closeModal;
-  $('stSave').onclick=()=>{s.daily=Math.max(1,parseFloat($('st-daily').value)||10);s.days=+$('st-days').value;s.core=$('st-core').value;s.safe=$('st-safe').value;save();closeModal();render();toast('Saved');};
+  $('stSave').onclick=()=>{s.daily=Math.max(1,parseFloat($('st-daily').value)||10);s.days=+$('st-days').value;if($('st-start').value)s.start=$('st-start').value;s.core=$('st-core').value;s.safe=$('st-safe').value;save();closeModal();render();toast('Saved');};
   $('exp').onclick=exportData; $('imp').onchange=e=>importData(e.target.files[0]);
   if($('ntf'))$('ntf').onclick=()=>{closeModal();enableNotify();};
   $('reset').onclick=()=>{if(confirm('Erase everything? Export a backup first if you want to keep it.')&&confirm('Really erase all data?')){localStorage.removeItem(KEY);load();closeModal();render();toast('All data erased.');}};
@@ -738,7 +809,7 @@ setInterval(()=>{if(!document.hidden)autoRefresh();},60000);
 if(navigator.onLine)refreshQuotes(false);
 // PWA: only works when served over http(s); double-click (file://) still works without it
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){navigator.serviceWorker.register('sw.js').then(()=>maybeNotify()).catch(()=>{});}else maybeNotify();
-window.__app={state:()=>state,T,render,refreshQuotes,streak,bestStreak};
+window.__app={streakInfo,state:()=>state,T,render,refreshQuotes,streak,bestStreak};
 })();
 </script>
 </body>
