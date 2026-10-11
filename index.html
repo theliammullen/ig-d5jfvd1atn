@@ -112,6 +112,20 @@ details summary{cursor:pointer;font-weight:700;min-height:40px;display:flex;alig
 .legend{display:flex;gap:14px;font-size:13px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
 .legend i{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .sidenav{display:none}
+.bonusbtn{width:100%;min-height:54px;border-radius:14px;border:1.5px solid var(--accent);background:linear-gradient(135deg,rgba(0,210,106,.16),rgba(0,210,106,.04));color:var(--accent);font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 0 18px rgba(0,210,106,.15)}
+.bonusbtn:active{transform:scale(.98)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.chip{min-height:46px;min-width:62px;padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--card2);font-weight:800;font-size:16px}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#03130a}
+.two>*{min-width:0}.field input,.field select{width:100%;min-width:0}.sheet{overflow-x:hidden}input[type=date]{-webkit-appearance:none;appearance:none}
+.bsplit{border:1px solid var(--line);border-radius:14px;padding:4px 12px;margin-bottom:12px;background:#0d0f0e}
+.bsplit .r{display:grid;grid-template-columns:minmax(64px,auto) 1fr 104px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.bsplit .r:last-child{border-bottom:none}
+.bsplit .a{font-size:20px;font-weight:900}
+.bsplit input{min-height:44px;width:100%;border-radius:10px;border:1px solid var(--line);background:var(--card2);padding:0 10px;font-size:15px}
+.bbadge{display:inline-block;font-size:10px;font-weight:900;letter-spacing:.06em;color:#03130a;background:var(--accent);padding:2px 7px;border-radius:99px;margin-left:6px;vertical-align:1px}
+tr.bonusrow td{background:rgba(0,210,106,.05)}
+tr.bonusrow td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 .freeze{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:#7dd3fc;background:rgba(125,211,252,.1);border:1px solid rgba(125,211,252,.25);padding:3px 9px;border-radius:99px}
 .freeze svg{width:14px;height:14px}
 .countdown{font-size:64px;font-weight:900;letter-spacing:-.04em;color:var(--accent);line-height:1;text-shadow:0 0 30px rgba(0,210,106,.35)}
@@ -361,6 +375,9 @@ const defaults=()=>({version:1,created:todayStr(),settings:{daily:10,days:7,core
 let state;
 function load(){try{state=Object.assign(defaults(),JSON.parse(localStorage.getItem(KEY)||'{}'));state.settings=Object.assign(defaults().settings,state.settings);}catch(e){state=defaults();}
   if(!Array.isArray(state.skips))state.skips=[];
+  if(!Array.isArray(state.deposits))state.deposits=[];
+  state.deposits=state.deposits.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items));
+  state.deposits.forEach(d=>{if(d.bonus&&!d.id)d.id='b'+Math.random().toString(36).slice(2,10);});
   if(!state.settings.start){const f=state.deposits.map(d=>d.date).sort()[0];state.settings.start=f||DEFAULT_START;save();}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('⚠️ Could not save. Storage may be full or blocked.');}}
 
@@ -391,7 +408,10 @@ function srcBadge(src){return {live:'<span class="badge real">Live prices</span>
 function roleOf(tk){return CORE[tk]?'core':SAFE[tk]?'safety':'growth';}
 function currentValue(){return Object.values(holdingsMap()).reduce((s,h)=>s+h.value,0);}
 function anyReal(){return Object.keys(state.balances).length>0||valueSource()!=='est';}
-function depositDates(){return [...new Set(state.deposits.map(d=>d.date))].sort();}
+function depositDates(){return [...new Set(state.deposits.filter(d=>!d.bonus).map(d=>d.date))].sort();} // daily $10 days only (bonuses excluded)
+const bonuses=()=>state.deposits.filter(d=>d.bonus);
+const depTotal=d=>d.items.reduce((a,i)=>a+i.amt,0);
+function bonusTotal(){return bonuses().reduce((a,d)=>a+depTotal(d),0);}
 const isWE=x=>{const d=parseD(x).getDay();return d===0||d===6;};
 const prevWD=x=>{do{x=addDays(x,-1);}while(isWE(x));return x;};
 // Forgiving streaks: trading days (weekdays) from the start date. Start with 1 freeze; earn 1 more for every
@@ -434,7 +454,7 @@ function daysToGoal(start,daily,rate){
   if(rate===0)return Math.ceil((GOAL-start)/daily);
   const dr=Math.pow(1+rate,1/365)-1; let v=start,n=0; while(v<GOAL&&n<36500){v=v*(1+dr)+daily;n++;} return n;
 }
-function doneToday(){return state.deposits.some(d=>d.date===todayStr());}
+function doneToday(){return state.deposits.some(d=>d.date===todayStr()&&!d.bonus);}
 
 // ---------- Live quotes ----------
 // Source: TMX Money public GraphQL (keyless, sends Access-Control-Allow-Origin: *). Same query via a public CORS proxy as backup.
@@ -467,7 +487,7 @@ function autoRefresh(){if(!navigator.onLine)return;const age=quoteAgeMin();if((m
 
 // ---------- Trophies ----------
 const T=[
- {id:'first',ic:'sprout',nm:'First Step',ds:'Log your very first $10',p:()=>[state.deposits.length,1]},
+ {id:'first',ic:'sprout',nm:'First Step',ds:'Log your very first $10',p:()=>[depositDates().length,1]},
  {id:'s3',ic:'flame',nm:'Warming Up',ds:'3 trading days in a row',p:()=>[bestStreak(),3]},
  {id:'s7',ic:'bolt',nm:'One Full Week',ds:'7 trading days in a row',p:()=>[bestStreak(),7]},
  {id:'s14',ic:'flame',nm:'Habit Forming',ds:'14 trading days in a row',p:()=>[bestStreak(),14]},
@@ -476,6 +496,9 @@ const T=[
  {id:'d50',ic:'cal',nm:'50 Days In',ds:'Invest on 50 different days',p:()=>[depositDates().length,50]},
  {id:'d100',ic:'cal',nm:'Century Club',ds:'Invest on 100 different days',p:()=>[depositDates().length,100]},
  {gold:1,id:'d365',ic:'trophy',nm:'Year of Wins',ds:'Invest on 365 different days',p:()=>[depositDates().length,365]},
+ {id:'bonus1',ic:'bolt',nm:'Bonus Round',ds:'Make your first bonus deposit',p:()=>[bonuses().length,1]},
+ {id:'bonus100',ic:'coin',nm:'Bonus Booster',ds:'Put $100 in bonus deposits',p:()=>[bonusTotal(),100],money:1},
+ {gold:1,id:'bonus500',ic:'gem',nm:'Bonus Boss',ds:'Put $500 in bonus deposits',p:()=>[bonusTotal(),500],money:1},
  {id:'bal',ic:'check',nm:'Reality Check',ds:'Enter your real balances from Wealthsimple',p:()=>[Object.keys(state.balances).length?1:0,1]},
  ...[100,250,500,1000,2500,5000,7500,10000].map((v,i)=>({id:'inv'+v,ic:['coin','coin','coin','gem','gem','gem','gem','trophy'][i],nm:fmt0(v)+' Put In',ds:'Invest '+fmt0(v)+' of your own money',p:()=>[totalInvested(),v],money:1})),
  ...[1000,5000,10000].map((v,i)=>({id:'val'+v,ic:['chart','chart','trophy'][i],nm:fmt0(v)+' Portfolio',ds:'Your portfolio is worth '+fmt0(v),p:()=>[currentValue(),v],money:1}))
@@ -580,9 +603,9 @@ function renderToday(){
     if($('skipBtn'))$('skipBtn').onclick=()=>{if(!state.skips.includes(t))state.skips.push(t);catchUp=false;save();render();const s2=streakInfo();toast(s2.lastFrozen?'Skipped. A streak freeze kept your streak alive.':'Skipped. Fresh start tomorrow.');};
   }
   const inv=totalInvested(), val=currentValue();
-  $('todaySummary').innerHTML=`<div class="stats">
+  $('todaySummary').innerHTML=BONUS_BTN+`<div style="height:14px"></div><div class="stats">
     <div class="stat"><div class="lbl">Streak (weekdays)</div><div class="val">${S.cur} day${S.cur===1?'':'s'}</div><div class="note" style="margin-top:6px">${freezeBadge(S.freezes)}</div><div class="note">Best: ${S.best}</div></div>
-    <div class="stat"><div class="lbl">Put in so far</div><div class="val">${fmt(inv)}</div><div class="note">${depositDates().length} days invested</div></div>
+    <div class="stat"><div class="lbl">Put in so far</div><div class="val">${fmt(inv)}</div><div class="note">${depositDates().length} days invested${bonuses().length?' + '+bonuses().length+' bonus':''}</div></div>
     <div class="stat" style="grid-column:1/-1"><div class="lbl">Worth now ${srcBadge(valueSource())}</div><div class="val">${fmt(val)}</div>
     <div class="bar" style="margin-top:10px"><i style="width:${Math.min(100,val/GOAL*100).toFixed(2)}%"></i></div><div class="note">${(val/GOAL*100).toFixed(1)}% of the way to $10,000</div></div></div>
     <p class="small muted" style="margin:12px 0 0">Streak freezes: you start with 1 and earn another for every 7 weekdays you invest (up to 3). Each one covers a skipped weekday so your streak doesn't reset.</p>`;
@@ -605,21 +628,23 @@ function renderTracker(){
    <div class="stat"><div class="lbl">Worth now</div><div class="val">${fmt(val)}</div><div class="note">${srcBadge(valueSource())}${valueSource()==='est'?' at '+pct(state.settings.rate)+'/yr':''}</div></div>
    <div class="stat"><div class="lbl">Gain / loss</div><div class="val" style="color:${gain>=0?'var(--accent)':'var(--danger)'}">${gain>=0?'+':''}${fmt2(gain)}</div><div class="note">${inv?((gain/inv)*100).toFixed(1)+'%':'—'}</div></div>
    <div class="stat"><div class="lbl">Streak</div><div class="val">${streak()} days</div><div class="note">${freezeBadge(streakInfo().freezes)} · best ${bestStreak()}</div></div>
+   <div class="stat" style="grid-column:1/-1"><div class="lbl">Bonus deposits</div><div class="val" style="font-size:20px">${bonuses().length} · ${fmt2(bonusTotal())}</div><div class="note">Extra money on top of your daily plan</div><div style="margin-top:10px">${BONUS_BTN}</div></div>
    <div class="stat" style="grid-column:1/-1"><div class="lbl">What this costs you</div><div class="note" style="font-size:14px;color:var(--text)">Fund fees of about ${weightedMer().toFixed(2)}% a year, which is about ${fmt2(currentValue()*weightedMer()/100)} a year on what you have now. $0 trading fees, $0 currency fees, $0 tax (TFSA).</div></div>`;
   $('goalBar').style.width=Math.min(100,val/GOAL*100)+'%'; $('goalPct').textContent=(val/GOAL*100).toFixed(1)+'%';
   document.querySelectorAll('.rateLbl').forEach(e=>e.textContent=pct(state.settings.rate));
   const hm=Object.values(holdingsMap()).sort((a,b)=>b.value-a.value);
   $('holdings').innerHTML=hm.length?hm.map(h=>`<div class="hold"><div><span class="dot" style="background:${ROLE_COLOR[h.role]}"></span><b>${esc(h.tk)}</b><div class="small muted" style="margin-left:18px">Put in ${fmt2(h.invested)}</div></div>
      <div style="text-align:right"><b>${fmt2(h.value)}</b><div class="small">${h.src==='live'?'<span class="badge real">Live</span>':h.src==='real'?'<span class="badge real">Your entry</span> <span class="muted">'+parseD(h.asOf).toLocaleDateString('en-CA',{month:'short',day:'numeric'})+'</span>':'<span class="badge">Estimate</span>'}</div></div></div>`).join(''):'<p class="muted small">Nothing yet. Tap “I did it” on the Today screen after your first buy.</p>';
-  const ds=[...state.deposits].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,60);
-  $('history').innerHTML=ds.length?`<table><tr><th>Date</th><th>What</th><th style="text-align:right">Total</th></tr>${ds.map(d=>`<tr data-d="${d.date}" style="cursor:pointer"><td>${parseD(d.date).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}</td><td class="small muted">${d.items.map(i=>esc(i.tk)+' '+fmt2(i.amt)).join(' · ')}</td><td style="text-align:right"><b>${fmt2(d.items.reduce((a,i)=>a+i.amt,0))}</b></td></tr>`).join('')}</table><p class="small muted">Tap a row to edit or delete it.</p>`:'<p class="muted small">Your days will show up here.</p>';
+  const ds=[...state.deposits].sort((a,b)=>b.date.localeCompare(a.date)||(a.bonus?1:0)-(b.bonus?1:0)).slice(0,80);
+  $('history').innerHTML=ds.length?`<table><tr><th>Date</th><th>What</th><th style="text-align:right">Total</th></tr>${ds.map(d=>`<tr ${d.bonus?`class="bonusrow" data-id="${d.id}"`:`data-d="${d.date}"`} style="cursor:pointer"><td>${parseD(d.date).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}${d.bonus?'<span class="bbadge">BONUS</span>':''}</td><td class="small muted">${d.items.map(i=>esc(i.tk)+' '+fmt2(i.amt)).join(' · ')}</td><td style="text-align:right"><b ${d.bonus?'style="color:var(--accent)"':''}>${fmt2(depTotal(d))}</b></td></tr>`).join('')}</table><p class="small muted">Tap a row to edit or delete it.</p>`:'<p class="muted small">Your days will show up here.</p>';
   $('history').querySelectorAll('tr[data-d]').forEach(r=>r.onclick=()=>editDay(r.dataset.d));
+  $('history').querySelectorAll('tr[data-id]').forEach(r=>r.onclick=()=>bonusForm(r.dataset.id));
   renderChart();
 }
 const pct=r=>(r*100).toFixed(0)+'%';
 function renderChart(){
   const W=640,H=260,P={l:52,r:12,t:12,b:28};
-  const t=todayStr(); const fd=state.deposits.length?depositDates()[0]:null; let start=[fd,state.settings.start].filter(Boolean).sort()[0]||t; if(start>t)start=t;
+  const t=todayStr(); const fd=state.deposits.length?state.deposits.map(d=>d.date).sort()[0]:null; let start=[fd,state.settings.start].filter(Boolean).sort()[0]||t; if(start>t)start=t;
   const daily=perDay(), r=state.settings.rate;
   const nowVal=currentValue(), nowInv=totalInvested();
   const left=simDays(nowVal,daily,r); const horizon=Math.min(isFinite(left)?left:1000,3650);
@@ -655,14 +680,15 @@ function renderForecast(){
     html+=`<div class="small muted" style="margin-top:6px"><b style="color:var(--text)">Your actual pace so far:</b> about ${fmt2(pace.perDay)} a day over ${pace.days} days (${pct}% of the plan). Including skips, at that pace:</div>`+row('Your pace, 5% a year (assumption)',simDays(v,pace.perDay,0.05));}
   else html+=`<div class="small muted" style="margin-top:6px">After your first week, this screen also shows a forecast based on your <b>actual pace</b>, including any skipped days.</div>`;
   const m=[100,1000,5000].filter(x=>x>v).slice(0,3).map(x=>`<li>${fmt(x)} by about <b>${parseD(addDays(t,simDays(v,daily,0.05,x))).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}</b></li>`).join('');
-  $('fc').innerHTML=html+(m?`<div class="small muted" style="margin-top:4px">Next milestones on the plan at 5% (assumption):<ul style="margin:6px 0 0;padding-left:20px">${m}</ul></div>`:'');
+  const bm=state.lastBonusMsg&&daysBetween(state.lastBonusMsg.at,todayStr())<=7?`<div class="fcrow" style="border:1px solid #1f5a3a;background:rgba(0,210,106,.07)"><div><b style="color:var(--accent)">${esc(state.lastBonusMsg.text)}</b><div class="small muted">Based on your plan at ${pct(state.settings.rate)} a year (an assumption).</div></div></div>`:'';
+  $('fc').innerHTML=bm+html+(m?`<div class="small muted" style="margin-top:4px">Next milestones on the plan at 5% (assumption):<ul style="margin:6px 0 0;padding-left:20px">${m}</ul></div>`:'');
 }
 function daysToGoalTo(start,daily,rate,goal){const dr=Math.pow(1+rate,1/365)-1;let v=start,n=0;while(v<goal&&n<36500){v=v*(1+dr)+daily;n++;}return n;}
 function renderTrophies(){
   let got=0;
   $('trophies').innerHTML=T.map(t=>{const [c,g]=t.p();const un=!!state.trophies[t.id];if(un)got++;const pr=Math.min(100,c/g*100);
     const prog=t.money?`${fmt(Math.min(c,g))} / ${fmt(g)}`:`${Math.min(Math.floor(c),g)} / ${g}`;
-    return `<div class="trophy ${un?'unlocked':'locked'} ${(t.gold||/10000|7500|5000/.test(t.id))?'gold':''} ${(window.__fresh||[]).includes(t.id)?'pop':''}" data-id="${t.id}"><div class="medal">${SV(GL[t.ic])}</div><div class="nm">${esc(t.nm)}</div><div class="ds">${esc(t.ds)}</div>
+    return `<div class="trophy ${un?'unlocked':'locked'} ${(t.gold||/10000|7500|5000|bonus500/.test(t.id))?'gold':''} ${(window.__fresh||[]).includes(t.id)?'pop':''}" data-id="${t.id}"><div class="medal">${SV(GL[t.ic])}</div><div class="nm">${esc(t.nm)}</div><div class="ds">${esc(t.ds)}</div>
     ${un?`<div class="when">Unlocked ${parseD(state.trophies[t.id]).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}</div>`:`<div class="bar"><i style="width:${pr}%"></i></div><div class="small muted" style="margin-top:6px">${prog}</div>`}</div>`;}).join('');
   $('trophyCount').textContent=got+' of '+T.length+' unlocked';$('trophyBar').style.width=(got/T.length*100)+'%';
   window.__fresh=[];
@@ -680,6 +706,7 @@ function renderPortfolio(){
       <div class="two"><div class="stat"><div class="lbl">Total put in</div><div class="val" style="font-size:20px">${fmt2(inv)}</div></div>
         <div class="stat"><div class="lbl">Tax / fees to sell</div><div class="val" style="font-size:20px">$0</div><div class="note">TFSA + CAD listings</div></div></div>
     </div>
+    <div style="margin-top:14px">${BONUS_BTN}</div>
     <div class="updated"><span>${status}</span><button class="btn small" id="pfRefresh" ${fetching?'disabled':''}>↻ Refresh</button></div>
     <div class="small muted" style="margin-top:4px">${srcLine}</div>${err}`;
   $('pfRefresh').onclick=()=>refreshQuotes(true);
@@ -699,13 +726,13 @@ function render(){renderReminder();renderToday();renderPortfolio();renderTracker
 
 // ---------- Actions ----------
 function logDay(date,items){
-  state.deposits=state.deposits.filter(d=>d.date!==date);
+  state.deposits=state.deposits.filter(d=>!(d.date===date&&!d.bonus));
   state.skips=state.skips.filter(d=>d!==date); catchUp=false;
   state.deposits.push({date,items:items.map(i=>({tk:i.tk,role:i.role,amt:+i.amt,sh:(typeof i.sh==='number'?i.sh:null),est:!!i.est}))});
   save(); const fresh=checkTrophies(true); if(!fresh.length){confetti(18);toast('Nice! '+fmt2(items.reduce((a,i)=>a+ +i.amt,0))+' invested. Streak: '+streak());} render();
 }
 function editDay(date,prefill){
-  const ex=state.deposits.find(d=>d.date===date); const items=ex?ex.items:(prefill||planFor(date));
+  const ex=state.deposits.find(d=>d.date===date&&!d.bonus); const items=ex?ex.items:(prefill||planFor(date));
   const unk=ex?ex.items.every(i=>i.sh==null||i.est):false;
   const Q=(state.quotes&&state.quotes.prices)||{};
   openModal(`<h2>${ex?'Edit':'Log'} ${niceDate(date)}</h2><p class="small muted">Type what you actually bought. To find the shares, open the order in Wealthsimple's <b>Activity</b> tab (it shows something like “0.1517 shares”).</p>
@@ -722,9 +749,50 @@ function editDay(date,prefill){
     const its=items.map((i,k)=>{const amt=Math.max(0,parseFloat($('ed-'+k).value)||0);let sh=u?NaN:parseFloat($('ed-sh-'+k).value),est=false;
       if(!(sh>0)){sh=null;if(Q[i.tk]&&amt>0){sh=amt/Q[i.tk].price;est=true;}}
       return {tk:i.tk,role:i.role,amt,sh,est};}).filter(i=>i.amt>0);
-    state.deposits=state.deposits.filter(d=>d.date!==date);closeModal();if(its.length)logDay(nd,its);else{save();render();}};
-  if(ex)$('edDel').onclick=()=>{if(confirm('Delete '+niceDate(date)+'?')){state.deposits=state.deposits.filter(d=>d.date!==date);save();closeModal();render();toast('Deleted.');}};
+    state.deposits=state.deposits.filter(d=>!(d.date===date&&!d.bonus));closeModal();if(its.length)logDay(nd,its);else{save();render();}};
+  if(ex)$('edDel').onclick=()=>{if(confirm('Delete '+niceDate(date)+'?')){state.deposits=state.deposits.filter(d=>!(d.date===date&&!d.bonus));save();closeModal();render();toast('Deleted.');}};
 }
+const BONUS_BTN=`<button class="bonusbtn" data-bonus="1">${'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'} Bonus deposit</button>`;
+function splitAmt(total,date){const c=Math.round(total*70)/100,sf=Math.round(total*20)/100,g=Math.round((total-c-sf)*100)/100;
+  return [{role:'core',tk:state.settings.core,amt:c},{role:'safety',tk:state.settings.safe,amt:sf},{role:'growth',tk:growthFor(date).tk,amt:g}];}
+function bonusForm(id){
+  const ex=id?state.deposits.find(d=>d.id===id):null; const Q=(state.quotes&&state.quotes.prices)||{};
+  let total=ex?depTotal(ex):20, date=ex?ex.date:todayStr();
+  const tks0=ex?ex.items.map(i=>i.tk):null;
+  openModal(`<h2>${ex?'Edit bonus deposit':'Bonus deposit'}</h2><p class="small muted" style="margin-top:-4px">Extra money on top of your daily $10. It boosts your totals and goal date, but it doesn't count toward streaks or replace the daily $10.</p>
+   <div class="chips">${[10,20,30,40,50].map(v=>`<button class="chip" data-v="${v}">$${v}</button>`).join('')}</div>
+   <div class="two"><div class="field"><label>Custom amount ($)</label><input type="number" inputmode="decimal" min="1" step="0.01" id="bn-amt" value="${total}"></div>
+   <div class="field"><label>Date</label><input type="date" id="bn-date" value="${date}" max="${todayStr()}"></div></div>
+   <div class="small" style="font-weight:800;margin-bottom:6px">Here's where it goes (same 70 / 20 / 10 split):</div>
+   <div class="bsplit" id="bn-split"></div>
+   <label class="chk"><input type="checkbox" id="bn-unk" ${!ex||ex.items.every(i=>i.sh==null||i.est)?'checked':''}> I don't know the shares</label>
+   <p class="small muted" id="bn-note" style="margin-top:0"></p>
+   <div class="row"><button class="btn primary" id="bnSave" style="flex:1">${ex?'Save':'Add bonus'}</button>${ex?'<button class="btn danger" id="bnDel">Delete</button>':''}<button class="btn" id="bnCancel">Cancel</button></div>`);
+  const draw=()=>{total=Math.max(0,parseFloat($('bn-amt').value)||0);date=$('bn-date').value||todayStr();
+    const sp=splitAmt(total,date);if(tks0)sp.forEach((x,k)=>{if(tks0[k])x.tk=tks0[k];});
+    const u=$('bn-unk').checked; const old={};document.querySelectorAll('#bn-split input').forEach(i=>old[i.dataset.k]=i.value);
+    $('bn-split').innerHTML=sp.map((x,k)=>{const e=ex&&ex.items[k];const v=old[k]!=null?old[k]:(e&&e.sh!=null&&!e.est?e.sh:'');
+      return `<div class="r"><div class="a">${fmt2(x.amt)}</div><div><b>${esc(x.tk)}</b><div class="small muted">${{core:'Core',safety:'Safety',growth:'Growth bet'}[x.role]}${x.role==='growth'?' · this week':''}</div></div>
+      <div class="shf" style="opacity:${u?.35:1}"><input type="number" inputmode="decimal" min="0" step="any" data-k="${k}" placeholder="shares" value="${v}" ${u?'disabled':''} aria-label="Shares of ${esc(x.tk)}"></div></div>`;}).join('');
+    document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',+c.dataset.v===total));
+    $('bn-note').textContent=u?(Object.keys(Q).length?'The app will work out shares from the latest price (marked ≈).':'You can add share counts later in Portfolio → Fix shares / balances.'):'Copy the shares from the order in Wealthsimple\'s Activity tab.';
+    $('bnSave').disabled=!(total>0);return sp;};
+  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{$('bn-amt').value=c.dataset.v;draw();});
+  $('bn-amt').oninput=draw;$('bn-date').onchange=draw;$('bn-unk').onchange=draw;draw();
+  $('bnCancel').onclick=closeModal;
+  $('bnSave').onclick=()=>{const sp=draw();if(!(total>0))return;const u=$('bn-unk').checked;
+    const items=sp.map((x,k)=>{let sh=u?NaN:parseFloat(document.querySelector(`#bn-split input[data-k="${k}"]`).value),est=false;
+      if(!(sh>0)){sh=null;if(Q[x.tk]&&x.amt>0){sh=x.amt/Q[x.tk].price;est=true;}}return {tk:x.tk,role:x.role,amt:x.amt,sh,est};}).filter(i=>i.amt>0);
+    const r=state.settings.rate, before=simDays(currentValue(),perDay(),r);
+    if(ex){ex.date=date;ex.items=items;}else state.deposits.push({id:'b'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),bonus:true,date,items});
+    const after=simDays(currentValue(),perDay(),r), closer=Math.max(0,before-after);
+    if(!ex&&closer>0)state.lastBonusMsg={text:`Your ${fmt2(total)} bonus moved your $10,000 goal ${closer} day${closer===1?'':'s'} closer!`,at:todayStr()};
+    save();closeModal();const fresh=checkTrophies(true);
+    if(!fresh.length){confetti(ex?0:60);toast(ex?'Bonus updated':(closer>0?`Bonus added! Goal moved ${closer} day${closer===1?'':'s'} closer.`:'Bonus added!'));}
+    render();};
+  if(ex)$('bnDel').onclick=()=>{if(confirm('Delete this '+fmt2(depTotal(ex))+' bonus?')){state.deposits=state.deposits.filter(d=>d.id!==id);save();closeModal();render();toast('Bonus deleted.');}};
+}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-bonus]');if(b)bonusForm();});
 function addPast(){const d=addDays(todayStr(),-1);editDay(d);}
 function balanceForm(){
   const hm=holdingsMap(); const tks=Object.keys(hm).length?Object.keys(hm):planFor(todayStr()).map(p=>p.tk);
@@ -809,7 +877,7 @@ setInterval(()=>{if(!document.hidden)autoRefresh();},60000);
 if(navigator.onLine)refreshQuotes(false);
 // PWA: only works when served over http(s); double-click (file://) still works without it
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){navigator.serviceWorker.register('sw.js').then(()=>maybeNotify()).catch(()=>{});}else maybeNotify();
-window.__app={streakInfo,state:()=>state,T,render,refreshQuotes,streak,bestStreak};
+window.__app={bonusForm,simDays,currentValue,totalInvested,streakInfo,state:()=>state,T,render,refreshQuotes,streak,bestStreak};
 })();
 </script>
 </body>
