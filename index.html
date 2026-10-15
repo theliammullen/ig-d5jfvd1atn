@@ -112,6 +112,8 @@ details summary{cursor:pointer;font-weight:700;min-height:40px;display:flex;alig
 .legend{display:flex;gap:14px;font-size:13px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
 .legend i{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .sidenav{display:none}
+.phase{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:var(--accent);background:rgba(0,210,106,.1);border:1px solid #1f5a3a;padding:4px 10px;border-radius:99px;letter-spacing:.02em}
+.shiftcard{margin-top:14px;border:1px solid #1f5a3a;border-left:4px solid var(--accent);border-radius:14px;padding:12px 14px;background:rgba(0,210,106,.06)}
 .bonusbtn{width:100%;min-height:54px;border-radius:14px;border:1.5px solid var(--accent);background:linear-gradient(135deg,rgba(0,210,106,.16),rgba(0,210,106,.04));color:var(--accent);font-weight:800;font-size:16px;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 0 18px rgba(0,210,106,.15)}
 .bonusbtn:active{transform:scale(.98)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
@@ -358,17 +360,32 @@ function weekIndex(s){ // weeks since a fixed Monday
   const base=parseD('2024-01-01'); return Math.floor((parseD(s)-base)/(7*864e5));
 }
 function growthFor(s){const n=GROWTH.length;return GROWTH[((weekIndex(s)%n)+n)%n];}
-function planFor(s){
-  const st=state.settings, d=st.daily;
-  const core=+(d*0.7).toFixed(2), safe=+(d*0.2).toFixed(2), grow=+(d-core-safe).toFixed(2);
-  return [{role:'core',tk:st.core,amt:core},{role:'safety',tk:st.safe,amt:safe},{role:'growth',tk:growthFor(s).tk,amt:grow}];
+function phaseBasis(){ // live/real portfolio value when we have it; otherwise money put in
+  if(!state.deposits.length)return 0;
+  return valueSource()==='est'?totalInvested():currentValue();
+}
+function currentPhase(basis){
+  const st=state.settings; const v=basis==null?phaseBasis():basis;
+  if(!st.glide)return {id:'grow',name:'Growth mode',eq:0.8,cash:0.2,core:0.8,safe:0.2,next:st.glide1,label:'80% XEQT · 20% CASH'};
+  if(v>=st.glide2)return {id:'protect',name:'Protect mode',eq:0.4,cash:0.6,core:0.4,safe:0.6,next:null,label:'40% XEQT · 60% CASH'};
+  if(v>=st.glide1)return {id:'balance',name:'Balance mode',eq:0.6,cash:0.4,core:0.6,safe:0.4,next:st.glide2,label:'60% XEQT · 40% CASH'};
+  return {id:'grow',name:'Growth mode',eq:0.8,cash:0.2,core:0.8,safe:0.2,next:st.glide1,label:'80% XEQT · 20% CASH'};
+}
+function planFor(s,total){
+  const st=state.settings, d=total==null?st.daily:total, ph=currentPhase();
+  const core=+(d*ph.core).toFixed(2), safe=+(d-core).toFixed(2);
+  return [{role:'core',tk:st.core,amt:core},{role:'safety',tk:st.safe,amt:safe}];
+}
+function phaseRate(equityRate,ph){ // blend stock assumption with ~2.5%/yr cash cushion (assumption)
+  return equityRate*(ph?ph.eq:0.8)+0.025*(ph?ph.cash:0.2);
 }
 function infoFor(tk){return CORE[tk]||SAFE[tk]||GROWTH.find(g=>g.tk===tk)||{name:tk,why:''};}
 const ROLE_COLOR={core:'#00d26a',safety:'#5eead4',growth:'#a3e635'};
 
-const LEARN=[["What is a stock?", "A stock (also called a share) is a tiny piece of ownership in a company. If the company grows and earns more, its shares usually become worth more, and some companies also pay out part of their profits to owners. If the company struggles, the share price can fall, sometimes a lot. Owning just one or two companies is risky because your money rides on how those few do."], ["What is an ETF?", "An ETF (exchange-traded fund) is one investment that holds a big basket of other investments, like hundreds or thousands of stocks. You buy it in Wealthsimple just like a stock. Because it's spread out, one company doing badly barely moves the whole fund. That's why ETFs are a popular, simple choice for everyday investors."], ["What's in XEQT and CASH?", "XEQT is an all-in-one ETF from iShares that owns stocks from Canada, the U.S., and other countries around the world, which adds up to thousands of companies (over 8,000 according to iShares in October 2026). It's 100% stocks, so it can grow over time but also drops when markets fall. CASH, from Global X, puts its money into high-interest savings accounts at big Canadian banks. Its price barely moves and it pays you interest every month, so it acts as your steady cushion."], ["What is a TFSA, and why is it tax-free?", "A TFSA (Tax-Free Savings Account) is an account type the Canadian government created so people can save and invest without paying tax on the growth. Anything you earn inside it, and anything you take out, is tax-free. Each year you get a set amount of “contribution room” (how much you're allowed to put in), and unused room carries forward. If you put in more than your room allows, the CRA charges a penalty of 1% of the extra amount per month until you fix it. When you withdraw money, that amount is added back to your room on January 1 of the next year, not right away."], ["Why split it 70/20/10?", "Each $10 is split into $7 core, $2 safety and $1 growth. The core (XEQT) is the main engine: broad, cheap and spread around the world. The safety part (CASH) doesn't swing much, so part of your money stays calm when the market drops. The small growth slice lets you try something more exciting without putting much at risk. It's a balance between steady and fun, not a formula that guarantees results."], ["Why $10 every day works", "Putting in the same amount on a regular schedule is called dollar-cost averaging. When prices are low, your $10 buys more; when they're high, it buys less, so you never have to guess the “right” time. Over time, growth can earn its own growth, which is called compounding. To be honest, markets do go down sometimes, occasionally by a lot, and your balance will dip. The biggest mistake people make is panic-selling during a drop. Sticking with the habit is what matters most."], ["What are fund fees (MER)?", "Every ETF charges a small yearly fee called the MER (management expense ratio). You never get a bill; it's quietly taken out of the fund's value. For example, a 0.20% MER costs about $2 a year for every $1,000 you have invested. Lower is better because every dollar not paid in fees stays invested and keeps growing for you. The funds in this plan are among the lower-cost options available in Canada."], ["How to buy fractional shares in Wealthsimple", "Open Wealthsimple and choose your TFSA. Search the ticker (for example XEQT) and tap Buy. Switch the order to buy in dollars instead of shares, type the amount (like $7), and confirm. You'll own a slice of a share, called a fractional share, which is how $10 a day can work even when one share costs more than $10."], ["How to cash out", "In Wealthsimple, open your TFSA, tap a holding and tap Sell. You can sell in dollars or shares. The trade takes one business day to settle, then you can choose Withdraw and send the cash to your bank. Inside a TFSA there's no tax on the money you take out. Remember that withdrawn room only comes back on January 1 of next year, so be careful about putting it back in the same year."]];
+const LEARN=[["What is a stock?", "A stock (also called a share) is a tiny piece of ownership in a company. If the company grows and earns more, its shares usually become worth more, and some companies also pay out part of their profits to owners. If the company struggles, the share price can fall, sometimes a lot. Owning just one or two companies is risky because your money rides on how those few do."], ["What is an ETF?", "An ETF (exchange-traded fund) is one investment that holds a big basket of other investments, like hundreds or thousands of stocks. You buy it in Wealthsimple just like a stock. Because it's spread out, one company doing badly barely moves the whole fund. That's why ETFs are a popular, simple choice for everyday investors."], ["What's in XEQT and CASH?", "XEQT is an all-in-one ETF from iShares that owns stocks from Canada, the U.S., and other countries around the world, which adds up to thousands of companies (over 8,000 according to iShares in October 2026). It's 100% stocks, so it can grow over time but also drops when markets fall. CASH, from Global X, puts its money into high-interest savings accounts at big Canadian banks. Its price barely moves and it pays you interest every month, so it acts as your steady cushion."], ["What is a TFSA, and why is it tax-free?", "A TFSA (Tax-Free Savings Account) is an account type the Canadian government created so people can save and invest without paying tax on the growth. Anything you earn inside it, and anything you take out, is tax-free. Each year you get a set amount of “contribution room” (how much you're allowed to put in), and unused room carries forward. If you put in more than your room allows, the CRA charges a penalty of 1% of the extra amount per month until you fix it. When you withdraw money, that amount is added back to your room on January 1 of the next year, not right away."], ["Why just XEQT and CASH (80/20)?", "Most of each $10 goes into XEQT, a broad world stock fund, and a smaller slice stays in CASH as a cushion. Famous long-term investors like Warren Buffett and John Bogle have argued that ordinary people are usually better off owning a low-cost index fund than trying to pick winners. Industry scorecards such as SPIVA regularly find that a majority of actively managed stock funds lag a plain index over longer periods. So this plan skips the rotating “growth bet” and keeps things simple: one growth engine and one safety bucket. Past growth picks you already own can stay; just don't buy more of them."], ["Why $10 every day works", "Putting in the same amount on a regular schedule is called dollar-cost averaging. When prices are low, your $10 buys more; when they're high, it buys less, so you never have to guess the “right” time. Over time, growth can earn its own growth, which is called compounding. To be honest, markets do go down sometimes, occasionally by a lot, and your balance will dip. The biggest mistake people make is panic-selling during a drop. Sticking with the habit is what matters most."], ["What is the safety shift?", "As you get close to $10,000, new deposits slowly put more into CASH and less into XEQT. By default that starts at $7,500 (60% XEQT / 40% CASH) and again at $9,000 (40% XEQT / 60% CASH). It's like gently tapping the brakes so a last-minute market drop hurts less. Money you already own stays where it is; only new $10s and bonuses change. You can change the thresholds or turn this off in Settings."], ["What are fund fees (MER)?", "Every ETF charges a small yearly fee called the MER (management expense ratio). You never get a bill; it's quietly taken out of the fund's value. For example, a 0.20% MER costs about $2 a year for every $1,000 you have invested. Lower is better because every dollar not paid in fees stays invested and keeps growing for you. The funds in this plan are among the lower-cost options available in Canada."], ["How to buy fractional shares in Wealthsimple", "Open Wealthsimple and choose your TFSA. Search the ticker (for example XEQT) and tap Buy. Switch the order to buy in dollars instead of shares, type the amount (like $8), and confirm. You'll own a slice of a share, called a fractional share, which is how $10 a day can work even when one share costs more than $10."], ["How to cash out", "In Wealthsimple, open your TFSA, tap a holding and tap Sell. You can sell in dollars or shares. The trade takes one business day to settle, then you can choose Withdraw and send the cash to your bank. Inside a TFSA there's no tax on the money you take out. Remember that withdrawn room only comes back on January 1 of next year, so be careful about putting it back in the same year."]];
+
 // ---------- State ----------
-const defaults=()=>({version:1,created:todayStr(),settings:{daily:10,days:7,core:'XEQT',safe:'CASH',rate:0.06,theme:'auto',notify:false},
+const defaults=()=>({version:1,created:todayStr(),settings:{daily:10,days:7,core:'XEQT',safe:'CASH',rate:0.06,theme:'auto',notify:false,glide:true,glide1:7500,glide2:9000},
   deposits:[], // {date, items:[{tk,role,amt}]}
   balances:{}, // tk -> {value, date}
   lastBalanceUpdate:null, trophies:{}, quotes:null, skips:[]});
@@ -378,6 +395,8 @@ function load(){try{state=Object.assign(defaults(),JSON.parse(localStorage.getIt
   if(!Array.isArray(state.deposits))state.deposits=[];
   state.deposits=state.deposits.filter(d=>d&&typeof d.date==='string'&&Array.isArray(d.items));
   state.deposits.forEach(d=>{if(d.bonus&&!d.id)d.id='b'+Math.random().toString(36).slice(2,10);});
+  const ds=state.settings; if(ds.glide==null)ds.glide=true; if(!ds.glide1)ds.glide1=7500; if(!ds.glide2)ds.glide2=9000;
+  if(ds.glide1>ds.glide2){const t=ds.glide1;ds.glide1=ds.glide2;ds.glide2=t;}
   if(!state.settings.start){const f=state.deposits.map(d=>d.date).sort()[0];state.settings.start=f||DEFAULT_START;save();}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){toast('⚠️ Could not save. Storage may be full or blocked.');}}
 
@@ -442,10 +461,12 @@ function missedPrev(){ // last trading day before today (on/after start) with no
   const t=todayStr();const p=prevWD(t);if(p<state.settings.start)return null;
   return depositDates().includes(p)?null:p;}
 const perDay=()=>state.settings.daily*(state.settings.days||7)/7; // average per calendar day
-function simDays(v,daily,rate,goal){ // days from today until value reaches goal; deposits begin on the start date
+function simDays(v,daily,equityRate,goal){ // days from today until value reaches goal; deposits begin on the start date.
+  // Uses the safety-shift phases: as value crosses thresholds, new money and assumed growth blend shift toward CASH.
   goal=goal||GOAL; if(v>=goal)return 0; const wait=Math.max(0,daysBetween(todayStr(),state.settings.start));
-  if(daily<=0&&rate<=0)return Infinity; const dr=Math.pow(1+rate,1/365)-1; let n=0;
-  while(v<goal&&n<36500){n++;v=v*(1+dr)+(n>wait||wait===0?daily:0);} return n;}
+  if(daily<=0&&equityRate<=0)return Infinity; let n=0;
+  while(v<goal&&n<36500){n++; const ph=currentPhase(v); const r=phaseRate(equityRate,ph); const dr=Math.pow(1+r,1/365)-1;
+    v=v*(1+dr)+(n>wait||wait===0?daily:0);} return n;}
 function actualPace(){ // average $ per calendar day since start, once there's a week of history
   const t=todayStr(),st=state.settings.start; if(st>t)return null; const days=daysBetween(st,t)+1; if(days<7)return null;
   const tot=state.deposits.filter(d=>d.date>=st).reduce((a,d)=>a+d.items.reduce((x,i)=>x+i.amt,0),0); return {perDay:tot/days,days};}
@@ -496,6 +517,7 @@ const T=[
  {id:'d50',ic:'cal',nm:'50 Days In',ds:'Invest on 50 different days',p:()=>[depositDates().length,50]},
  {id:'d100',ic:'cal',nm:'Century Club',ds:'Invest on 100 different days',p:()=>[depositDates().length,100]},
  {gold:1,id:'d365',ic:'trophy',nm:'Year of Wins',ds:'Invest on 365 different days',p:()=>[depositDates().length,365]},
+ {id:'glide',ic:'check',nm:'Safety Shift',ds:'Reach the first safety-shift threshold (your new deposits put more into CASH)',p:()=>[state.settings.glide&&phaseBasis()>=state.settings.glide1?1:0,1]},
  {id:'bonus1',ic:'bolt',nm:'Bonus Round',ds:'Make your first bonus deposit',p:()=>[bonuses().length,1]},
  {id:'bonus100',ic:'coin',nm:'Bonus Booster',ds:'Put $100 in bonus deposits',p:()=>[bonusTotal(),100],money:1},
  {gold:1,id:'bonus500',ic:'gem',nm:'Bonus Boss',ds:'Put $500 in bonus deposits',p:()=>[bonusTotal(),500],money:1},
@@ -553,18 +575,17 @@ function show(tab){
 
 // ---------- Renderers ----------
 function weightedMer(){const p=planFor(todayStr());const tot=p.reduce((a,x)=>a+x.amt,0);return p.reduce((a,x)=>a+x.amt*(infoFor(x.tk).mer||0),0)/tot;}
-function costLine(){const m=weightedMer();const yr=state.settings.daily*365;const base=Math.max(currentValue(),yr);
-  return `about ${m.toFixed(2)}% a year in fund fees, roughly ${fmt2(base*m/100)} a year on ${fmt(base)}. Wealthsimple charges $0 to buy these, and there's no currency fee because everything is in Canadian dollars. Inside your TFSA, there's no tax on gains.`;}
+function costLine(){const m=weightedMer();const yr=state.settings.daily*365;const base=Math.max(currentValue(),yr);const ph=currentPhase();
+  return `about ${m.toFixed(2)}% a year in fund fees on today's ${ph.label} mix, roughly ${fmt2(base*m/100)} a year on ${fmt(base)}. Wealthsimple charges $0 to buy these, and there's no currency fee because everything is in Canadian dollars. Inside your TFSA, there's no tax on gains.`;}
 let catchUp=false;
 function planToday(t){const base=planFor(t);if(!catchUp)return base;return base.map(p=>({...p,amt:+(p.amt*2).toFixed(2)}));}
 function slotsHTML(plan,t){
-  const g=growthFor(t); const nextMon=addDays(t,7-((parseD(t).getDay()+6)%7));
-  const labels={core:'Core',safety:'Safety',growth:'Growth bet'};
+  const labels={core:'Core',safety:'Safety',growth:'Past growth'};
   return plan.map(p=>{const inf=infoFor(p.tk);const alt=p.role==='core'?(p.tk==='XEQT'?'VEQT':'XEQT'):p.role==='safety'?(p.tk==='CASH'?'PSA':'CASH'):null;
-    return `<div class="slot"><div class="amt">${fmt2(p.amt).replace('.00','')}</div><div><div class="tk">${esc(p.tk)}<span>${labels[p.role]}</span></div>
+    return `<div class="slot"><div class="amt">${fmt2(p.amt).replace('.00','')}</div><div><div class="tk">${esc(p.tk)}<span>${labels[p.role]||p.role}</span></div>
     <div class="small" style="opacity:.85">${esc(inf.name)}</div><div class="why">${esc(inf.why)}</div>
     ${alt?`<div class="alt">Can't find it? ${alt} does the same job.</div>`:''}
-    ${p.role==='growth'?`<div class="alt">This week's pick. A new one rotates in on ${parseD(nextMon).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}.${g.type==='CDR'?' In Wealthsimple, choose the one labelled <b>CDR</b> (priced in CAD) so you avoid currency fees.':''}</div>`:''}
+    ${p.role==='growth'?`<div class="alt"><b>Past growth pick</b> — keep holding, no new buys needed.</div>`:''}
     </div></div>`;}).join('');
 }
 function renderToday(){
@@ -575,7 +596,7 @@ function renderToday(){
     $('todayCard').innerHTML=`<div class="sub">${niceDate(t)} · Wealthsimple TFSA</div>
       <h1>Your first ${fmt2(state.settings.daily).replace('.00','')} goes in on ${parseD(st).toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}</h1>
       <div class="row" style="align-items:baseline;gap:12px;margin-top:10px"><div class="countdown">${n}</div><div style="font-weight:800;font-size:18px">day${n===1?'':'s'} to go</div></div>
-      <p class="small" style="opacity:.9;margin:12px 0 0">Here's a preview of how that first ${fmt2(state.settings.daily).replace('.00','')} will be split. Meanwhile, make sure your Wealthsimple TFSA has some cash in it, and read the Learn tab.</p>
+      <p class="small" style="opacity:.9;margin:12px 0 0">Here's a preview of how that first ${fmt2(state.settings.daily).replace('.00','')} will be split: ${esc(currentPhase().label)}. Meanwhile, make sure your Wealthsimple TFSA has some cash in it, and read the Learn tab.</p>
       <div class="split">${slotsHTML(planFor(st),st)}</div>
       <div class="btnrow"><button class="btn" id="startNow">Start today instead</button><button class="btn" id="goLearn">Read the basics</button></div>`;
     $('startNow').onclick=()=>{state.settings.start=t;save();render();toast('Start date moved to today');};
@@ -590,7 +611,10 @@ function renderToday(){
   }else{
     const missed=!done&&!isWE(t)?missedPrev():null;
     const plan=planToday(t);
+    const ph=currentPhase(); const shiftMsg=ph.id==='balance'?'You\'re close! To protect your gains, more of your $10 now goes to CASH.':ph.id==='protect'?'Almost there! Most of each new $10 goes to CASH so a late market drop hurts less.':'';
     $('todayCard').innerHTML=`<div class="sub">${niceDate(t)} · Wealthsimple TFSA</div><h1>${done?'Done for today':'Today, put your '+fmt2(plan.reduce((a,p)=>a+p.amt,0)).replace('.00','')+' here'}</h1>
+     <div class="row" style="margin:8px 0 0;gap:8px;flex-wrap:wrap"><span class="phase">${esc(ph.name)} · ${esc(ph.label)}</span>${ph.next?`<span class="small muted">Safety shift at ${fmt0(ph.next)}</span>`:''}</div>
+     ${shiftMsg?`<div class="shiftcard"><b>${shiftMsg}</b><div class="small muted" style="margin-top:4px">Money you already own stays put. Only new deposits follow this mix. Change thresholds in Settings.</div></div>`:''}
      ${missed?`<div class="catch"><div class="small"><b>Want to catch up?</b> You missed ${parseD(missed).toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'})}. Totally optional: add the missed ${fmt2(state.settings.daily).replace('.00','')} today, split the same way.</div><button class="toggle ${catchUp?'on':''}" id="catchBtn">${catchUp?'Catching up ✓':'Make it '+fmt2(state.settings.daily*2).replace('.00','')}</button></div>`:''}
      <div class="split">${slotsHTML(plan,t)}</div>
      ${isWE(t)?`<div class="small" style="margin-top:14px;color:var(--accent)"><b>It's the weekend.</b> Markets are closed, so an order placed now goes through Monday. Taking the weekend off is fine too: streaks only count weekdays.</div>`:''}
@@ -633,7 +657,7 @@ function renderTracker(){
   $('goalBar').style.width=Math.min(100,val/GOAL*100)+'%'; $('goalPct').textContent=(val/GOAL*100).toFixed(1)+'%';
   document.querySelectorAll('.rateLbl').forEach(e=>e.textContent=pct(state.settings.rate));
   const hm=Object.values(holdingsMap()).sort((a,b)=>b.value-a.value);
-  $('holdings').innerHTML=hm.length?hm.map(h=>`<div class="hold"><div><span class="dot" style="background:${ROLE_COLOR[h.role]}"></span><b>${esc(h.tk)}</b><div class="small muted" style="margin-left:18px">Put in ${fmt2(h.invested)}</div></div>
+  $('holdings').innerHTML=hm.length?hm.map(h=>`<div class="hold"><div><span class="dot" style="background:${ROLE_COLOR[h.role]}"></span><b>${esc(h.tk)}</b>${h.role==='growth'?'<span class="bbadge" style="background:#a3e635">PAST</span>':''}<div class="small muted" style="margin-left:18px">Put in ${fmt2(h.invested)}${h.role==='growth'?' · past growth pick — keep holding, no new buys needed':''}</div></div>
      <div style="text-align:right"><b>${fmt2(h.value)}</b><div class="small">${h.src==='live'?'<span class="badge real">Live</span>':h.src==='real'?'<span class="badge real">Your entry</span> <span class="muted">'+parseD(h.asOf).toLocaleDateString('en-CA',{month:'short',day:'numeric'})+'</span>':'<span class="badge">Estimate</span>'}</div></div></div>`).join(''):'<p class="muted small">Nothing yet. Tap “I did it” on the Today screen after your first buy.</p>';
   const ds=[...state.deposits].sort((a,b)=>b.date.localeCompare(a.date)||(a.bonus?1:0)-(b.bonus?1:0)).slice(0,80);
   $('history').innerHTML=ds.length?`<table><tr><th>Date</th><th>What</th><th style="text-align:right">Total</th></tr>${ds.map(d=>`<tr ${d.bonus?`class="bonusrow" data-id="${d.id}"`:`data-d="${d.date}"`} style="cursor:pointer"><td>${parseD(d.date).toLocaleDateString('en-CA',{month:'short',day:'numeric'})}${d.bonus?'<span class="bbadge">BONUS</span>':''}</td><td class="small muted">${d.items.map(i=>esc(i.tk)+' '+fmt2(i.amt)).join(' · ')}</td><td style="text-align:right"><b ${d.bonus?'style="color:var(--accent)"':''}>${fmt2(depTotal(d))}</b></td></tr>`).join('')}</table><p class="small muted">Tap a row to edit or delete it.</p>`:'<p class="muted small">Your days will show up here.</p>';
@@ -675,7 +699,8 @@ function renderForecast(){
   $('fcDaily').textContent=fmt2(state.settings.daily)+(state.settings.days===5?' every weekday':' a day')+(st>t?' starting '+parseD(st).toLocaleDateString('en-CA',{weekday:'short',month:'short',day:'numeric'}):'');
   $('rateSel').value=String(state.settings.rate);
   const row=(l,n,sub)=>{const d=addDays(t,n);return `<div class="fcrow"><div><b>${l}</b><div class="small muted">${n===0?'You made it!':(isFinite(n)?`about ${(n/365).toFixed(1)} years · ${n.toLocaleString()} days`:'not at this pace')}${sub?' · '+sub:''}</div></div><div style="text-align:right"><div class="big">${n===0?'Done':isFinite(n)?parseD(d).toLocaleDateString('en-CA',{month:'short',year:'numeric'}):'—'}</div><div class="small muted">${n?'reach $10,000':''}</div></div></div>`;};
-  let html=[[0,'No growth (just your savings)'],[0.05,'5% a year (assumption)'],[0.07,'7% a year (assumption)']].map(([r,l])=>row(l,simDays(v,daily,r))).join('');
+  let html=[[0,'No growth (just your savings)'],[0.05,'5% stock assumption, blended with ~2.5% cash by phase'],[0.07,'7% stock assumption, blended with ~2.5% cash by phase']].map(([r,l])=>row(l,simDays(v,daily,r))).join('');
+  html+=`<div class="small muted" style="margin-top:6px">Stock %s above are assumptions for the XEQT slice. Cash is assumed ~2.5%/yr. As you cross safety-shift thresholds, more of each new $10 goes to CASH, so the blended rate slows — labelled assumptions, not promises.</div>`;
   if(pace){const pct=daily?Math.round(pace.perDay/daily*100):0;
     html+=`<div class="small muted" style="margin-top:6px"><b style="color:var(--text)">Your actual pace so far:</b> about ${fmt2(pace.perDay)} a day over ${pace.days} days (${pct}% of the plan). Including skips, at that pace:</div>`+row('Your pace, 5% a year (assumption)',simDays(v,pace.perDay,0.05));}
   else html+=`<div class="small muted" style="margin-top:6px">After your first week, this screen also shows a forecast based on your <b>actual pace</b>, including any skipped days.</div>`;
@@ -718,6 +743,7 @@ function renderPortfolio(){
       <div class="pgrid"><div>Shares<b>${sh}</b></div><div>Put in<b>${fmt2(h.invested)}</b></div><div>Price<b>${h.price?fmt2(h.price):'—'}</b></div>
       <div>Today<b class="${day==null?'':day>=0?'pos':'neg'}">${day==null?'—':(day>=0?'+':'')+day.toFixed(2)+'%'}</b></div><div>Value from<b style="font-size:13px">${h.src==='live'?'Live price':h.src==='real'?'Your entry':'Estimate'}</b></div><div>Gain<b class="${gl>=0?'pos':'neg'}">${h.invested?(gl/h.invested*100).toFixed(1)+'%':'—'}</b></div></div>
       ${h.src==='live'&&h.unknownPart?`<div class="small muted" style="margin-top:8px">${fmt2(h.unknownAmt)} of buys have no share count, so they're counted at what you paid.</div>`:''}
+      ${h.role==='growth'?`<div class="small muted" style="margin-top:8px"><b>Past growth pick</b> — keep holding, no new buys needed.</div>`:''}
       ${h.src!=='live'?`<div class="small muted" style="margin-top:8px">${h.price?'Add your share count to see the live value.':'No live price right now.'}</div>`:''}</div>`;}).join(''):'<p class="muted small">No holdings yet. Log your first $10 on the Today screen.</p>';
   $('pfNote').innerHTML='Shares marked ≈ were worked out from the dollar amount and the price at the time. For exact numbers, tap <b>Fix shares / balances</b> and copy the share counts from Wealthsimple.';
 }
@@ -753,8 +779,8 @@ function editDay(date,prefill){
   if(ex)$('edDel').onclick=()=>{if(confirm('Delete '+niceDate(date)+'?')){state.deposits=state.deposits.filter(d=>!(d.date===date&&!d.bonus));save();closeModal();render();toast('Deleted.');}};
 }
 const BONUS_BTN=`<button class="bonusbtn" data-bonus="1">${'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'} Bonus deposit</button>`;
-function splitAmt(total,date){const c=Math.round(total*70)/100,sf=Math.round(total*20)/100,g=Math.round((total-c-sf)*100)/100;
-  return [{role:'core',tk:state.settings.core,amt:c},{role:'safety',tk:state.settings.safe,amt:sf},{role:'growth',tk:growthFor(date).tk,amt:g}];}
+function splitAmt(total,date){const ph=currentPhase();const c=Math.round(total*ph.core*100)/100,sf=Math.round((total-c)*100)/100;
+  return [{role:'core',tk:state.settings.core,amt:c},{role:'safety',tk:state.settings.safe,amt:sf}];}
 function bonusForm(id){
   const ex=id?state.deposits.find(d=>d.id===id):null; const Q=(state.quotes&&state.quotes.prices)||{};
   let total=ex?depTotal(ex):20, date=ex?ex.date:todayStr();
@@ -763,7 +789,7 @@ function bonusForm(id){
    <div class="chips">${[10,20,30,40,50].map(v=>`<button class="chip" data-v="${v}">$${v}</button>`).join('')}</div>
    <div class="two"><div class="field"><label>Custom amount ($)</label><input type="number" inputmode="decimal" min="1" step="0.01" id="bn-amt" value="${total}"></div>
    <div class="field"><label>Date</label><input type="date" id="bn-date" value="${date}" max="${todayStr()}"></div></div>
-   <div class="small" style="font-weight:800;margin-bottom:6px">Here's where it goes (same 70 / 20 / 10 split):</div>
+   <div class="small" style="font-weight:800;margin-bottom:6px">Here's where it goes (same ${esc(currentPhase().label)} split as today):</div>
    <div class="bsplit" id="bn-split"></div>
    <label class="chk"><input type="checkbox" id="bn-unk" ${!ex||ex.items.every(i=>i.sh==null||i.est)?'checked':''}> I don't know the shares</label>
    <p class="small muted" id="bn-note" style="margin-top:0"></p>
@@ -772,7 +798,7 @@ function bonusForm(id){
     const sp=splitAmt(total,date);if(tks0)sp.forEach((x,k)=>{if(tks0[k])x.tk=tks0[k];});
     const u=$('bn-unk').checked; const old={};document.querySelectorAll('#bn-split input').forEach(i=>old[i.dataset.k]=i.value);
     $('bn-split').innerHTML=sp.map((x,k)=>{const e=ex&&ex.items[k];const v=old[k]!=null?old[k]:(e&&e.sh!=null&&!e.est?e.sh:'');
-      return `<div class="r"><div class="a">${fmt2(x.amt)}</div><div><b>${esc(x.tk)}</b><div class="small muted">${{core:'Core',safety:'Safety',growth:'Growth bet'}[x.role]}${x.role==='growth'?' · this week':''}</div></div>
+      return `<div class="r"><div class="a">${fmt2(x.amt)}</div><div><b>${esc(x.tk)}</b><div class="small muted">${{core:'Core',safety:'Safety',growth:'Past growth'}[x.role]||x.role}</div></div>
       <div class="shf" style="opacity:${u?.35:1}"><input type="number" inputmode="decimal" min="0" step="any" data-k="${k}" placeholder="shares" value="${v}" ${u?'disabled':''} aria-label="Shares of ${esc(x.tk)}"></div></div>`;}).join('');
     document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('on',+c.dataset.v===total));
     $('bn-note').textContent=u?(Object.keys(Q).length?'The app will work out shares from the latest price (marked ≈).':'You can add share counts later in Portfolio → Fix shares / balances.'):'Copy the shares from the order in Wealthsimple\'s Activity tab.';
@@ -826,15 +852,22 @@ function settings(){
    <div class="field"><label>Days I invest</label><select id="st-days"><option value="7" ${s.days!==5?'selected':''}>Every day (7 a week)</option><option value="5" ${s.days===5?'selected':''}>Weekdays only (5 a week)</option></select></div>
    <div class="field"><label>Core fund</label><select id="st-core"><option ${s.core==='XEQT'?'selected':''}>XEQT</option><option ${s.core==='VEQT'?'selected':''}>VEQT</option></select></div>
    <div class="field"><label>Safety fund</label><select id="st-safe"><option ${s.safe==='CASH'?'selected':''}>CASH</option><option ${s.safe==='PSA'?'selected':''}>PSA</option></select></div>
+   <h3 style="margin-top:8px">Safety shift</h3>
+   <p class="small muted">As you near $10,000, new deposits put more into CASH. Money you already own stays put.</p>
+   <label class="chk"><input type="checkbox" id="st-glide" ${s.glide!==false?'checked':''}> Turn on safety shift</label>
+   <div class="two"><div class="field"><label>First shift (60/40)</label><input type="number" id="st-g1" min="1000" step="100" value="${s.glide1||7500}"></div>
+   <div class="field"><label>Second shift (40/60)</label><input type="number" id="st-g2" min="1000" step="100" value="${s.glide2||9000}"></div></div>
    <div class="row" style="margin-bottom:18px"><button class="btn primary" id="stSave">Save settings</button></div>
    <h3>Backup</h3><p class="small muted">Your data lives only on this device/browser. Export a backup now and then (e.g., to Files or email it to yourself).</p>
    <div class="row"><button class="btn" id="exp">Export backup</button><label class="btn" style="display:inline-flex;align-items:center">Import backup<input type="file" id="imp" accept="application/json,.json" hidden></label></div>
    ${('Notification' in window)?`<h3 style="margin-top:18px">Reminders</h3><div class="row"><button class="btn" id="ntf">${s.notify?'Reminders are on':'Turn on weekly reminder'}</button></div>`:''}
    <h3 style="margin-top:18px">Danger zone</h3><button class="btn danger" id="reset">Erase all data</button>
-   <h3 style="margin-top:18px">About the picks</h3><p class="small muted">Core: XEQT/VEQT (all-in-one global stock funds). Safety: CASH/PSA (savings-account-style funds). Growth bet rotates weekly: ${GROWTH.map(g=>g.tk).join(', ')}. Stocks marked CDR are Canadian Depositary Receipts: a Canadian-dollar version of a U.S. stock with currency protection built in. Approximate yearly fund fees (MER, the fee built into a fund's price): XEQT 0.19%, VEQT 0.22%, CASH 0.11%, PSA 0.17%, XQQ/ZQQ about 0.39%, CDRs have no yearly fund fee. Live prices come from TMX Money's free public data (may be delayed ~15 min). The app can't see your Wealthsimple account, so you log what you bought (and shares, if you know them).</p>
+   <h3 style="margin-top:18px">About the picks</h3><p class="small muted">New buys: XEQT (or VEQT) for growth and CASH (or PSA) for safety — an 80/20 split that shifts toward CASH near $10,000 if safety shift is on. Older “growth bet” holdings (XQQ, ZQQ, CDRs like AAPL) stay in your totals; keep holding them, no new buys needed. Approximate yearly fund fees (MER): XEQT 0.19%, VEQT 0.22%, CASH 0.11%, PSA 0.17%. Live prices from TMX Money (may be delayed ~15 min). The app can't see your Wealthsimple account, so you log what you bought.</p>
    <div class="row"><button class="btn" id="stClose">Close</button></div>`);
   $('stClose').onclick=closeModal;
-  $('stSave').onclick=()=>{s.daily=Math.max(1,parseFloat($('st-daily').value)||10);s.days=+$('st-days').value;if($('st-start').value)s.start=$('st-start').value;s.core=$('st-core').value;s.safe=$('st-safe').value;save();closeModal();render();toast('Saved');};
+  $('stSave').onclick=()=>{s.daily=Math.max(1,parseFloat($('st-daily').value)||10);s.days=+$('st-days').value;if($('st-start').value)s.start=$('st-start').value;s.core=$('st-core').value;s.safe=$('st-safe').value;
+    s.glide=$('st-glide').checked; let g1=Math.max(100,parseFloat($('st-g1').value)||7500), g2=Math.max(100,parseFloat($('st-g2').value)||9000); if(g1>g2){const t=g1;g1=g2;g2=t;} s.glide1=g1;s.glide2=g2;
+    save();closeModal();render();toast('Saved');};
   $('exp').onclick=exportData; $('imp').onchange=e=>importData(e.target.files[0]);
   if($('ntf'))$('ntf').onclick=()=>{closeModal();enableNotify();};
   $('reset').onclick=()=>{if(confirm('Erase everything? Export a backup first if you want to keep it.')&&confirm('Really erase all data?')){localStorage.removeItem(KEY);load();closeModal();render();toast('All data erased.');}};
@@ -877,7 +910,7 @@ setInterval(()=>{if(!document.hidden)autoRefresh();},60000);
 if(navigator.onLine)refreshQuotes(false);
 // PWA: only works when served over http(s); double-click (file://) still works without it
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){navigator.serviceWorker.register('sw.js').then(()=>maybeNotify()).catch(()=>{});}else maybeNotify();
-window.__app={bonusForm,simDays,currentValue,totalInvested,streakInfo,state:()=>state,T,render,refreshQuotes,streak,bestStreak};
+window.__app={bonusForm,simDays,currentValue,totalInvested,streakInfo,currentPhase,phaseBasis,planFor,splitAmt,state:()=>state,T,render,refreshQuotes,streak,bestStreak};
 })();
 </script>
 </body>
